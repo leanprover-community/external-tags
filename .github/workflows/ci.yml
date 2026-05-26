@@ -1,0 +1,23 @@
+name: CI
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install elan
+        run: |
+          curl -sSfL https://elan.lean-lang.org/elan-init.sh \
+            | bash -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - run: lake build
+      - name: Smoke test — Wikidata
+        run: lake exe crossref-snippet wikidata Q42
+      - name: Smoke test — Stacks
+        run: lake exe crossref-snippet stacks 01AB
+      - name: Smoke test — Kerodon
+        run: lake exe crossref-snippet kerodon 0001
