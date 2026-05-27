@@ -65,6 +65,21 @@ def mdTableEscape (s : String) : String :=
    |>.replace "\n" " "
    |>.replace "\r" " "
 
+/-- Escape a string destined for inside a `` `...` `` Markdown code span
+in a table cell. Code spans pass `*`, `_`, `[`, `]`, `(`, `)`, `#`, `<`,
+`>`, `&`, `\` through verbatim, so applying `mdTableEscape` here would
+leak literal backslashes into the rendered comment. We only handle the
+characters that can break out: backticks (swapped for the look-alike `ˋ`
+so a tag/decl ending the span can't inject Markdown after it), `|` (the
+table-cell separator, which is recognised even inside code spans), and
+newlines (which terminate the table row). -/
+def mdCodeCellEscape (s : String) : String :=
+  s.replace "`" "ˋ"
+   |>.replace "|" "\\|"
+   |>.replace "\r\n" " "
+   |>.replace "\n" " "
+   |>.replace "\r" " "
+
 /-! ## Comment header / footer -/
 
 /-- A magic marker we include in every comment so the workflow that updates
@@ -94,8 +109,8 @@ percent-encoded before going into the URL so a `)` in an adversarial tag
 can't close the Markdown link target early. -/
 def renderRow (r : Record) (outcome : SnippetOutcome) : String :=
   let url := s!"{databaseURL r.database}{percentEncode r.tag}"
-  let tagCell := s!"[`{mdTableEscape r.tag}`]({url})"
-  let declCell := s!"`{mdTableEscape r.declName}`"
+  let tagCell := s!"[`{mdCodeCellEscape r.tag}`]({url})"
+  let declCell := s!"`{mdCodeCellEscape r.declName}`"
   let (titleCell, descCell) := match outcome with
     | .ok title desc => (mdTableEscape title, mdTableEscape desc)
     | .missing        => ("**missing**", "tag not found upstream")
