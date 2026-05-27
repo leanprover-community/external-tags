@@ -99,17 +99,11 @@ Cli/
   Review.lean      crossref-review entry point (local convenience tool)
 ```
 
-## History
+## Why this lives outside Mathlib
 
-Most of `Fetch.lean` and `Snippet.lean` is lifted verbatim from three stacked
-PRs against mathlib4 that originally added this tooling in-tree:
-
-- https://github.com/leanprover-community/mathlib4/pull/39662 — standalone script
-- https://github.com/leanprover-community/mathlib4/pull/39664 — info-view widget (dropped)
-- https://github.com/leanprover-community/mathlib4/pull/39666 — CI workflow
-
-Following maintainer discussion, the tooling was extracted here to keep
-~1,300 LOC of review surface out of Mathlib. The mathlib4 surface is now
-the dump script (~80 LOC including the README entry), the `post_steps`
-emit in `build_template.yml` (~30 LOC), and the `crossref_review.yml`
-workflow_run shim (~120 LOC including the caching scaffolding).
+This tooling could in principle live in mathlib4's `scripts/` directory,
+but it's deliberately split out so iteration on the snippet renderer, the
+local review tool, or the upstream API clients doesn't add review burden
+to Mathlib. The mathlib4 surface is the dump script, the `post_steps`
+emit step in `build_template.yml`, and the `crossref_review.yml`
+workflow_run shim — together a few hundred lines.
