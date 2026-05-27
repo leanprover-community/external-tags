@@ -15,9 +15,10 @@ Authors: Kim Morrison
   renderer can subtract tags that already existed at the branch point
   and only highlight changes the PR actually authored.
 
-Both artifacts have a 5-day retention. If either is missing, the caller
-falls back to a simpler mode (whole-Mathlib render for a missing bridge;
-no baseline filter for a missing baseline).
+Retention: the bridge artifact is 5 days (privileged, per-PR-build), the
+baseline is 30 days (plain, uploaded on every master push). If either is
+missing, the caller falls back to a simpler mode (whole-Mathlib render
+for a missing bridge; no baseline filter for a missing baseline).
 -/
 
 namespace Crossrefs
@@ -164,7 +165,7 @@ def downloadBaselineForPR (pr : Nat) (extractDir : System.FilePath)
     | IO.eprintln "baseline: merge-base lookup failed"; return none
   let some runId ← findMergeBaseRunId repo mb
     | IO.eprintln s!"baseline: no successful CI run found for merge-base {mb} \
-        (likely expired; artifacts have 5-day retention)"; return none
+        (likely expired; the baseline artifact has 30-day retention)"; return none
   let baselineDir := extractDir / "baseline"
   IO.FS.createDirAll baselineDir
   match ← ghRunDownload repo runId baselineArtifactName baselineDir with
