@@ -11,29 +11,48 @@ import Crossrefs.Diff
 # `crossref-render` CLI
 
 ```sh
-crossref-render --tsv <path> [--diff <range>] [--out <path>]
+crossref-render --tsv <path>
+                [--baseline-tsv <path>]
+                [--diff <range> | --changed-files <path>]
+                [--strict]
+                [--out <path>]
 ```
 
 Consumes the dump TSV produced by mathlib4's `scripts/dump_crossref_tags.lean`,
-optionally filters to records whose source module is in the changed-file set
-of a git diff range, fetches snippets, and writes the Markdown bot comment.
+optionally filters by which files the PR touched, optionally subtracts a
+baseline TSV (so we don't re-render tags that already existed on master at
+the PR's branch point), fetches snippets, and writes the Markdown bot
+comment.
 
 If `--out` is omitted, writes to stdout.
 
-If `--diff` is omitted, renders all records (useful for offline inspection of
-the full set, but normally CI passes a diff range).
+If neither `--diff` nor `--changed-files` is supplied, all records are
+considered (useful for offline inspection of the full set).
 
-Exit codes: 0 = nothing to report, 1 = comment written and at least one tag
-is `missing`, 2 = comment written, all tags resolve. Other non-zero = error.
+`--baseline-tsv` takes the TSV produced by the dump script for the PR's
+merge-base commit. Rows in the current TSV that match a row in the
+baseline verbatim (`db\ttag\tdeclName\tmodule\tcomment`) are dropped:
+they're not changes introduced by this PR. This keeps a maintenance PR
+that touches a thousand files but doesn't change any tag attribute from
+flooding the comment with snippets it didn't author.
+
+`--strict` makes malformed TSV rows fatal (default: warn and skip).
+The CI orchestrator passes `--strict` so producer bugs or malicious
+artifacts can't silently hide tags from the bot comment.
+
+Exit codes: 0 = nothing to report, 1 = comment written and at least one
+tag is `missing`, 2 = comment written, all tags resolve. Other = error.
 -/
 
 open Crossrefs
 
 structure Args where
-  tsv           : Option System.FilePath := none
-  diff          : Option String := none
-  changedFiles  : Option System.FilePath := none
-  out           : Option System.FilePath := none
+  tsv          : Option System.FilePath := none
+  baselineTsv  : Option System.FilePath := none
+  diff         : Option String := none
+  changedFiles : Option System.FilePath := none
+  out          : Option System.FilePath := none
+  strict       : Bool := false
 
 def parseArgs (argv : List String) : IO (Option Args) := do
   let mut out : Args := {}
@@ -41,31 +60,35 @@ def parseArgs (argv : List String) : IO (Option Args) := do
   let argv := argv.toArray
   while i < argv.size do
     let a := argv[i]!
+    let needsArg : IO (Option String) := do
+      if i + 1 ≥ argv.size then
+        IO.eprintln s!"{a} expects a value"
+        return none
+      return some argv[i + 1]!
     if a == "--tsv" then
-      if i + 1 ≥ argv.size then IO.eprintln "--tsv expects a value"; return none
-      out := { out with tsv := some argv[i + 1]! }
-      i := i + 2
+      let some v ← needsArg | return none
+      out := { out with tsv := some v }; i := i + 2
+    else if a == "--baseline-tsv" then
+      let some v ← needsArg | return none
+      out := { out with baselineTsv := some v }; i := i + 2
     else if a == "--diff" then
-      if i + 1 ≥ argv.size then IO.eprintln "--diff expects a value"; return none
-      out := { out with diff := some argv[i + 1]! }
-      i := i + 2
+      let some v ← needsArg | return none
+      out := { out with diff := some v }; i := i + 2
     else if a == "--changed-files" then
-      if i + 1 ≥ argv.size then IO.eprintln "--changed-files expects a value"; return none
-      out := { out with changedFiles := some argv[i + 1]! }
-      i := i + 2
+      let some v ← needsArg | return none
+      out := { out with changedFiles := some v }; i := i + 2
     else if a == "--out" then
-      if i + 1 ≥ argv.size then IO.eprintln "--out expects a value"; return none
-      out := { out with out := some argv[i + 1]! }
-      i := i + 2
+      let some v ← needsArg | return none
+      out := { out with out := some v }; i := i + 2
+    else if a == "--strict" then
+      out := { out with strict := true }; i := i + 1
     else
       IO.eprintln s!"unknown argument: {a}"; return none
   return some out
 
 def usage : IO Unit := do
-  IO.eprintln "Usage: crossref-render --tsv <path> [--diff <range>] \
-    [--changed-files <path>] [--out <path>]"
-  IO.eprintln "  --diff requires being inside a git checkout of the repo."
-  IO.eprintln "  --changed-files reads one path per line; no git required."
+  IO.eprintln "Usage: crossref-render --tsv <path> [--baseline-tsv <path>] \
+    [--diff <range> | --changed-files <path>] [--strict] [--out <path>]"
 
 def loadChangedFiles (path : System.FilePath) : IO (Std.HashSet String) := do
   let text ← IO.FS.readFile path
@@ -86,16 +109,32 @@ def filterByDiff? (records : Array Record) (args : Args) :
     return records.filter fun r => changed.contains r.module
   | none, none => return records
 
+/-- Build a `(db, tag, declName, module, comment)` set from a TSV file.
+Used to subtract baseline rows from the current PR's rows. -/
+def loadRowKeys (path : System.FilePath) : IO (Std.HashSet String) := do
+  let text ← IO.FS.readFile path
+  let mut s : Std.HashSet String := ∅
+  for line in text.splitOn "\n" do
+    let trimmed := line.trimAscii.toString
+    if !trimmed.isEmpty then s := s.insert trimmed
+  return s
+
+def filterByBaseline? (records : Array Record) (args : Args) :
+    IO (Array Record) := do
+  match args.baselineTsv with
+  | none => return records
+  | some path =>
+    let baseline ← loadRowKeys path
+    return records.filter fun r => !baseline.contains r.toTsvKey
+
 /-- Run `fetchMany` for each database, then zip the outcomes back onto the
 records in the original order. -/
 def gatherOutcomes (records : Array Record) :
     IO (Array (Record × SnippetOutcome)) := do
   -- Group tags by database, deduplicating.
-  let mut byDb : Std.HashMap (String) (Array String) := ∅
+  let mut byDb : Std.HashMap String (Array String) := ∅
   for r in records do
-    let key := r.database.name
-    byDb := byDb.insert key ((byDb.getD key #[]).push r.tag)
-  -- Fetch each database's tags.
+    byDb := byDb.insert r.database.name ((byDb.getD r.database.name #[]).push r.tag)
   let mut results : Std.HashMap (String × String) SnippetOutcome := ∅
   for (dbName, tags) in byDb.toList do
     let some db := Database.ofName? dbName | continue
@@ -104,8 +143,7 @@ def gatherOutcomes (records : Array Record) :
       results := results.insert (dbName, tag) outcome
   return records.map fun r =>
     let key := (r.database.name, r.tag)
-    let outcome := results.getD key (.network "no result")
-    (r, outcome)
+    (r, results.getD key (.network "no result"))
 
 def main (argv : List String) : IO UInt32 := do
   let some args ← parseArgs argv
@@ -121,8 +159,14 @@ def main (argv : List String) : IO UInt32 := do
     | .inl line => malformed := malformed.push line
     | .inr r    => records := records.push r
   if !malformed.isEmpty then
-    IO.eprintln s!"warning: ignored {malformed.size} malformed TSV row(s)"
+    if args.strict then
+      IO.eprintln s!"error (--strict): {malformed.size} malformed TSV row(s)"
+      for l in malformed.take 5 do IO.eprintln s!"  {l}"
+      return 65
+    else
+      IO.eprintln s!"warning: ignored {malformed.size} malformed TSV row(s)"
   let filtered ← filterByDiff? records args
+  let filtered ← filterByBaseline? filtered args
   if filtered.isEmpty then
     IO.eprintln "no cross-reference tags in scope; nothing to comment"
     return 0

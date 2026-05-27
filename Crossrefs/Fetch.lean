@@ -63,6 +63,37 @@ def databaseLabel : Database → String
   | .stacks   => "Stacks Tag"
   | .wikidata => "Wikidata"
 
+/-! ## Untrusted-tag hygiene
+
+The dump TSV is treated as untrusted: the producer (`dump_crossref_tags.lean`)
+runs from the PR checkout, so a malicious PR can emit arbitrary strings.
+We percent-encode tags before pasting them into URL targets or filenames so
+unsafe characters can't escape the surrounding syntax. -/
+
+private def hexDigit (n : Nat) : Char :=
+  if n < 10 then Char.ofNat (n + '0'.toNat)
+  else Char.ofNat (n - 10 + 'A'.toNat)
+
+private def percentByte (b : UInt8) : String :=
+  String.ofList ['%', hexDigit (b.toNat / 16), hexDigit (b.toNat % 16)]
+
+private def isUnreserved (c : Char) : Bool :=
+  c.isAlphanum || c == '-' || c == '.' || c == '_' || c == '~'
+
+/-- Percent-encode a string for use in a URL path component or query value
+(RFC 3986 unreserved set). For legitimate tags (Q[0-9]+ / [A-Z0-9]{4})
+this is identity; for adversarial input it prevents `)` or `/` from
+breaking out of the surrounding link or path. -/
+def percentEncode (s : String) : String := Id.run do
+  let bs := s.toUTF8
+  let mut out := ""
+  for i in [:bs.size] do
+    let b := bs.get! i
+    let c := Char.ofNat b.toNat
+    if b < 128 && isUnreserved c then out := out.push c
+    else out := out ++ percentByte b
+  out
+
 /-- The outcome of trying to fetch a snippet. -/
 inductive SnippetOutcome where
   /-- Upstream returned a `(title, description)`. Either may be empty. -/

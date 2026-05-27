@@ -16,15 +16,19 @@ crossref-review --pr <N> [--repo <owner/repo>] [--out <path>]
 ```
 
 Flow:
-1. Find the most recent successful mathlib4 CI run for the PR.
-2. `gh run download` the bridge artifact (containing the dump TSV).
+1. Find the PR's most recent successful CI run; download the bridge
+   artifact (the dump TSV).
+2. Resolve the PR's merge-base SHA via the GitHub `compare` API; if
+   there's a master CI run at that commit, download its baseline TSV.
 3. `gh pr diff --name-only` for the changed-files list.
-4. Run `crossref-render` on the TSV, filtered by that list. Markdown out.
-5. Open the result with `xdg-open` / `open`.
+4. Run `crossref-render` on the current TSV, filtered by changed files
+   and (if the baseline is available) subtracted against the baseline so
+   we only render tags this PR actually added or changed.
+5. If the renderer wrote a comment, open it with `xdg-open` / `open`.
 
-CI artifacts expire after 5 days. There's no fallback to building Mathlib
-locally yet — if you need that, run the dump script in your own checkout
-and pass the TSV to `crossref-render` directly.
+CI artifacts expire after 5 days. If no recent CI ran for the PR, run
+the dump script in a local Mathlib checkout and pass the TSV to
+`crossref-render` directly.
 
 Without `--out`, writes to a temp file and opens it. With `--out`, writes
 to the given path and does not open anything.
@@ -33,9 +37,9 @@ to the given path and does not open anything.
 open Crossrefs
 
 structure Args where
-  pr : Option Nat := none
+  pr   : Option Nat := none
   repo : String := defaultRepo
-  out : Option System.FilePath := none
+  out  : Option System.FilePath := none
 
 def parseArgs (argv : List String) : IO (Option Args) := do
   let mut out : Args := {}
@@ -76,15 +80,20 @@ def main (argv : List String) : IO UInt32 := do
   IO.eprintln s!"Looking for the most recent successful CI run for PR #{pr} on {args.repo}…"
   match ← downloadTsvForPR pr args.repo with
   | .error e =>
-    IO.eprintln s!"{e}"
+    IO.eprintln e
     IO.eprintln "(CI artifacts expire after 5 days; if the build is older, run \
       scripts/dump_crossref_tags.lean in a local Mathlib checkout and pass the \
       TSV to `crossref-render --tsv …` directly.)"
     return 1
   | .ok result =>
     IO.eprintln s!"Got bridge artifact from run {result.runId}; TSV at {result.tsvPath}"
-    -- Filter the (whole-Mathlib) TSV down to what the PR actually touched,
-    -- using `gh pr diff --name-only` so we don't need a local mathlib checkout.
+    -- Baseline (optional): the master CI run at the PR's merge-base commit.
+    -- Missing baseline is non-fatal; we just don't subtract anything.
+    let baseline? ← downloadBaselineForPR pr result.extractDir args.repo
+    match baseline? with
+    | some p => IO.eprintln s!"Got baseline TSV at {p}"
+    | none   => IO.eprintln "No baseline TSV available; rendering against the changed-files filter only."
+    -- Changed-files list via the GitHub API (no local mathlib checkout needed).
     let diffProc ← IO.Process.output {
       cmd := "gh"
       args := #["pr", "diff", toString pr, "--repo", args.repo, "--name-only"]
@@ -97,15 +106,25 @@ def main (argv : List String) : IO UInt32 := do
     IO.FS.writeFile changedFiles (String.intercalate "\n" lean)
     let outPath := args.out.getD (result.extractDir / "crossref-review.md")
     let renderExe := (← IO.appPath).parent.getD "." / "crossref-render"
-    let renderArgs : Array String :=
+    let mut renderArgs : Array String :=
       #["--tsv", result.tsvPath.toString,
         "--changed-files", changedFiles.toString,
         "--out", outPath.toString]
+    if let some p := baseline? then
+      renderArgs := renderArgs ++ #["--baseline-tsv", p.toString]
     let proc ← IO.Process.spawn { cmd := renderExe.toString, args := renderArgs }
     let exit ← proc.wait
-    if exit != 0 && exit != 1 && exit != 2 then
+    -- crossref-render: 0 = nothing to comment (no file written),
+    --                  1 = comment written + missing tag(s),
+    --                  2 = comment written + all resolved.
+    match exit with
+    | 0 =>
+      IO.eprintln "No new or changed cross-reference tags in this PR; nothing to show."
+      return 0
+    | 1 | 2 =>
+      IO.eprintln s!"Wrote {outPath}"
+      if args.out.isNone then openInBrowser outPath
+      return 0
+    | _ =>
       IO.eprintln s!"crossref-render exited {exit}"
       return 1
-    IO.eprintln s!"Wrote {outPath}"
-    if args.out.isNone then openInBrowser outPath
-    return 0

@@ -41,6 +41,12 @@ def Record.parseRow? (line : String) : Option Record := do
     return { database := db, tag, declName, module, comment }
   | _ => none
 
+/-- Reconstruct a `Record`'s canonical TSV row. Used to compare a current
+PR's rows against a baseline TSV (downloaded for the PR's merge-base
+commit) so we only render tags this PR actually added or changed. -/
+def Record.toTsvKey (r : Record) : String :=
+  s!"{r.database.name}\t{r.tag}\t{r.declName}\t{r.module}\t{r.comment}"
+
 /-- Parse a whole dump TSV. Blank lines are skipped; malformed rows are
 returned as `Sum.inl line` so the caller can decide what to do with them. -/
 def Record.parseTsv (text : String) :

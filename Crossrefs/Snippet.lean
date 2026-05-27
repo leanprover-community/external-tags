@@ -32,14 +32,16 @@ partial def chunkList (n : Nat) (xs : List α) : List (List α) :=
 
 /-! ## On-disk cache -/
 
-/-- Locate the per-tag cache file, if `CROSSREF_CACHE_DIR` is set. -/
+/-- Locate the per-tag cache file, if `CROSSREF_CACHE_DIR` is set. The tag
+is percent-encoded so a malicious tag containing `/` or `..` can't escape
+the cache directory. -/
 def cacheFile? (db : Database) (tag : String) : IO (Option System.FilePath) := do
   match ← IO.getEnv "CROSSREF_CACHE_DIR" with
   | none => return none
   | some dir =>
     let path : System.FilePath := dir
     IO.FS.createDirAll path
-    return some (path / s!"{db.name}-{tag}.json")
+    return some (path / s!"{db.name}-{percentEncode tag}.json")
 
 /-- Read a cached raw response body, if one exists. -/
 def cacheLoad (db : Database) (tag : String) : IO (Option String) := do

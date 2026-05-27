@@ -75,17 +75,25 @@ def commentMarker : String := "<!-- external-tags:crossref-review -->"
 def commentHeader : String :=
   s!"{commentMarker}\n## Cross-reference review\n"
 
-/-- Small grey footer line that goes at the bottom of every PR comment. -/
+/-- Small grey footer line that goes at the bottom of every PR comment.
+Note: the underlying check is *advisory* — the TSV is produced by a script
+in mathlib4's `scripts/`, which a PR can edit, so a determined PR author
+can hide tags from this comment. The orchestrator caps render time and
+row counts to bound abuse, but the check shouldn't be treated as a
+guarantee that every tag in the PR is upstream-resolved. -/
 def commentFooterNote : String :=
   "<sub>Posted by [external-tags](https://github.com/leanprover-community/external-tags). \
-  Snippets are fetched from upstream live; if a tag is reported missing, check that the \
-  identifier exists on the source site.</sub>"
+  Snippets are fetched from upstream live. \
+  This check is **advisory**: the dump script runs from the PR checkout, so a \
+  PR can edit the producer to hide tags from this comment.</sub>"
 
 /-! ## Per-database rendering -/
 
-/-- Render one `(record, outcome)` pair as a Markdown table row. -/
+/-- Render one `(record, outcome)` pair as a Markdown table row. The tag is
+percent-encoded before going into the URL so a `)` in an adversarial tag
+can't close the Markdown link target early. -/
 def renderRow (r : Record) (outcome : SnippetOutcome) : String :=
-  let url := s!"{databaseURL r.database}{r.tag}"
+  let url := s!"{databaseURL r.database}{percentEncode r.tag}"
   let tagCell := s!"[`{mdTableEscape r.tag}`]({url})"
   let declCell := s!"`{mdTableEscape r.declName}`"
   let (titleCell, descCell) := match outcome with
