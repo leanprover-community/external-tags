@@ -4,10 +4,10 @@ Tooling for reviewing cross-reference tags (`@[stacks ...]`, `@[kerodon ...]`,
 `@[wikidata ...]`) that PR authors add to [mathlib4](https://github.com/leanprover-community/mathlib4).
 
 This repository lives outside Mathlib so it can iterate freely without
-adding review burden. Mathlib's only contribution to the pipeline is a
-~40-line `scripts/dump_crossref_tags.lean` that walks the
-`Mathlib.CrossRef.tagExt` environment extension and writes a TSV of every
-tag in the build.
+adding review burden. Mathlib's contribution to the pipeline is just
+`scripts/dump_crossref_tags.lean` (which walks `Mathlib.CrossRef.tagExt`
+and emits a TSV) plus the build_template.yml emit step and the
+`crossref_review.yml` workflow_run shim — ~240 LOC total.
 
 ## What this provides
 
@@ -17,7 +17,7 @@ Three Lake executables:
 |---|---|
 | `crossref-snippet <db> <tag>…` | Fetch a one-line `(title, description)` for each tag from the upstream database. TSV out, network in. |
 | `crossref-render --tsv <path> [--diff <range>] [--out <path>]` | Consume the dump TSV, optionally filter by `git diff --name-only`, fetch snippets, emit the Markdown PR comment. Used by mathlib-ci's PR-comment orchestrator. |
-| `crossref-review --pr <N>` | Local convenience wrapper: fetch the mathlib4 CI artifact for PR `N`, render to Markdown, open the result. Falls back (with prompt) to building Mathlib locally if no CI artifact is available. |
+| `crossref-review --pr <N>` | Local convenience wrapper: fetch the mathlib4 CI artifact for PR `N` (5-day retention), filter by the PR's diff, render to Markdown, open the result. |
 
 ## Quick start
 

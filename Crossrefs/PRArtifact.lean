@@ -11,9 +11,9 @@ Authors: Kim Morrison
 build emitted for the PR's most recent successful CI run, and locates the
 embedded TSV inside it.
 
-Artifacts have a 5-day retention, so this only works for PRs whose CI ran
-recently. Use `crossref-review --build-locally` (TODO, not yet implemented)
-to compute the TSV from a local Mathlib build instead.
+Artifacts have a 5-day retention. For older PRs, run
+`scripts/dump_crossref_tags.lean` in a local Mathlib checkout and pass the
+resulting TSV to `crossref-render` directly.
 -/
 
 namespace Crossrefs

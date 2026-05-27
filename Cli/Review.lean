@@ -83,10 +83,8 @@ def main (argv : List String) : IO UInt32 := do
     return 1
   | .ok result =>
     IO.eprintln s!"Got bridge artifact from run {result.runId}; TSV at {result.tsvPath}"
-    -- Get the PR's changed .lean files so we can filter the (whole-Mathlib)
-    -- TSV down to what the PR actually touched. We use `gh pr diff
-    -- --name-only` instead of a local `git diff` so this works from any
-    -- directory (no mathlib checkout required).
+    -- Filter the (whole-Mathlib) TSV down to what the PR actually touched,
+    -- using `gh pr diff --name-only` so we don't need a local mathlib checkout.
     let diffProc ← IO.Process.output {
       cmd := "gh"
       args := #["pr", "diff", toString pr, "--repo", args.repo, "--name-only"]

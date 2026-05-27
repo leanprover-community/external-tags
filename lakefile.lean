@@ -1,8 +1,7 @@
 import Lake
 open Lake DSL
 
-package «external-tags» where
-  -- No package-level options yet.
+package «external-tags»
 
 lean_lib Crossrefs
 
