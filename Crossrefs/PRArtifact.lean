@@ -9,8 +9,11 @@ Authors: Kim Morrison
 
 `crossref-review --pr <N>` downloads the bridge artifact that mathlib4's
 build emitted for the PR's most recent successful CI run, and locates the
-embedded TSV inside it. Falls back (after explicit prompt) to building
-Mathlib locally and re-running the dump script.
+embedded TSV inside it.
+
+Artifacts have a 5-day retention, so this only works for PRs whose CI ran
+recently. Use `crossref-review --build-locally` (TODO, not yet implemented)
+to compute the TSV from a local Mathlib build instead.
 -/
 
 namespace Crossrefs
@@ -26,24 +29,29 @@ def bridgeArtifactName : String := "crossref-tags-bridge"
 /-- The expected TSV filename inside the bridge artifact. -/
 def tsvName : String := "crossref-tags.tsv"
 
+/-- Result of `downloadTsvForPR`. -/
 structure DownloadResult where
   /-- Filesystem path to the extracted TSV. -/
   tsvPath : System.FilePath
-  /-- The directory we extracted into (caller cleans up). -/
+  /-- The directory we extracted into. Caller is responsible for cleanup. -/
   extractDir : System.FilePath
   /-- The CI run ID we sourced this artifact from. -/
   runId : String
   deriving Repr
 
-/-- Find the most recent successful CI run for the PR via `gh pr checks`. -/
+/-- Find the most recent successful CI run for the PR. We accept any
+successful run that may have produced our artifact (`gh run download`
+will fail later if the run didn't actually emit one); this avoids
+filtering by workflow name, which differs between same-repo
+(`continuous integration`) and fork PRs
+(`continuous integration (mathlib forks)`). -/
 def findLatestRunId (repo : String) (pr : Nat) : IO (Option String) := do
   let output ← IO.Process.output {
     cmd := "gh"
     args := #["pr", "view", toString pr, "--repo", repo,
               "--json", "statusCheckRollup", "--jq",
               "[.statusCheckRollup[] | select(.status == \"COMPLETED\" and \
-               .conclusion == \"SUCCESS\" and .workflowName == \"continuous integration\") \
-               | .detailsUrl] | last"]
+               .conclusion == \"SUCCESS\") | .detailsUrl] | last"]
   }
   if output.exitCode != 0 then return none
   let trimmed := output.stdout.trimAscii.toString
@@ -74,11 +82,8 @@ def downloadTsvForPR (pr : Nat) (repo : String := defaultRepo) :
     IO (Except String DownloadResult) := do
   let some runId ← findLatestRunId repo pr
     | return .error s!"no completed successful CI run found for PR #{pr}"
-  let baseDir ← IO.appPath
-  let parent := match baseDir.parent with
-    | some p => p
-    | none => "."
-  let extractDir := parent / s!"crossref-review-{pr}-{runId}"
+  let tmpRoot : System.FilePath := (← IO.getEnv "TMPDIR").getD "/tmp"
+  let extractDir := tmpRoot / s!"crossref-review-{pr}-{runId}"
   IO.FS.createDirAll extractDir
   match ← ghRunDownload repo runId extractDir with
   | .error e => return .error e

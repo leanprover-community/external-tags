@@ -14,6 +14,8 @@ jobs:
           curl -sSfL https://elan.lean-lang.org/elan-init.sh \
             | bash -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      # All three exes are @[default_target] in lakefile.lean, so this
+      # builds the full surface that CI then exercises.
       - run: lake build
       - name: Smoke test — Wikidata
         run: lake exe crossref-snippet wikidata Q42
@@ -21,3 +23,12 @@ jobs:
         run: lake exe crossref-snippet stacks 01AB
       - name: Smoke test — Kerodon
         run: lake exe crossref-snippet kerodon 0001
+      - name: Smoke test — render (hostile escaping)
+        run: |
+          printf 'wikidata\tQ42\tA.bar\tMathlib/A.lean\t**bold**\n' > /tmp/t.tsv
+          printf 'wikidata\tQ42\tB.zap\tMathlib/B.lean\t<script>alert(1)</script>\n' >> /tmp/t.tsv
+          # crossref-render exits 2 on "all resolved cleanly"; tolerate it.
+          rc=0; lake exe crossref-render --tsv /tmp/t.tsv --out /tmp/c.md || rc=$?
+          test "$rc" -eq 2
+          grep -F '\*\*bold\*\*' /tmp/c.md
+          grep -F '&lt;script&gt;' /tmp/c.md

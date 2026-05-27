@@ -8,21 +8,23 @@ import Crossrefs.PRArtifact
 /-!
 # `crossref-review` CLI
 
-Local convenience wrapper for the Johan use-case: "grab the diff of a PR and
-spit out a nicely formatted page locally."
+Local convenience wrapper: "grab the diff of a PR and spit out a nicely
+formatted page locally."
 
 ```sh
-crossref-review --pr <N> [--repo <owner/repo>] [--out <path>] [--build-locally]
+crossref-review --pr <N> [--repo <owner/repo>] [--out <path>]
 ```
 
-Default flow:
+Flow:
 1. Find the most recent successful mathlib4 CI run for the PR.
 2. `gh run download` the bridge artifact (containing the dump TSV).
-3. Run `crossref-render` on it, filtered by the PR's diff range.
-4. Open the resulting HTML/Markdown in `xdg-open` / `open`.
+3. `gh pr diff --name-only` for the changed-files list.
+4. Run `crossref-render` on the TSV, filtered by that list. Markdown out.
+5. Open the result with `xdg-open` / `open`.
 
-Fallback (after explicit prompt, or `--build-locally`): check the PR out,
-`lake build` Mathlib, run `scripts/dump_crossref_tags.lean`, then render.
+CI artifacts expire after 5 days. There's no fallback to building Mathlib
+locally yet — if you need that, run the dump script in your own checkout
+and pass the TSV to `crossref-render` directly.
 
 Without `--out`, writes to a temp file and opens it. With `--out`, writes
 to the given path and does not open anything.
@@ -34,7 +36,6 @@ structure Args where
   pr : Option Nat := none
   repo : String := defaultRepo
   out : Option System.FilePath := none
-  buildLocally : Bool := false
 
 def parseArgs (argv : List String) : IO (Option Args) := do
   let mut out : Args := {}
@@ -56,23 +57,12 @@ def parseArgs (argv : List String) : IO (Option Args) := do
       if i + 1 ≥ argv.size then IO.eprintln "--out expects a value"; return none
       out := { out with out := some argv[i + 1]! }
       i := i + 2
-    else if a == "--build-locally" then
-      out := { out with buildLocally := true }
-      i := i + 1
     else
       IO.eprintln s!"unknown argument: {a}"; return none
   return some out
 
 def usage : IO Unit := do
-  IO.eprintln "Usage: crossref-review --pr <N> [--repo <owner/repo>] [--out <path>] [--build-locally]"
-
-def confirm (prompt : String) : IO Bool := do
-  IO.print prompt
-  IO.print " [y/N] "
-  (← IO.getStdout).flush
-  let line ← (← IO.getStdin).getLine
-  let answer := line.trimAscii.toString.toLower
-  return answer == "y" || answer == "yes"
+  IO.eprintln "Usage: crossref-review --pr <N> [--repo <owner/repo>] [--out <path>]"
 
 def openInBrowser (path : System.FilePath) : IO Unit := do
   let opener := if System.Platform.isOSX then "open" else "xdg-open"
@@ -87,15 +77,10 @@ def main (argv : List String) : IO UInt32 := do
   match ← downloadTsvForPR pr args.repo with
   | .error e =>
     IO.eprintln s!"{e}"
-    if !args.buildLocally then
-      let ok ← confirm s!"No CI artifact found. Build Mathlib locally to compute it? \
-        (This may take 30+ minutes.)"
-      if !ok then
-        IO.eprintln "Aborting. Re-run with --build-locally to skip this prompt."
-        return 1
-    IO.eprintln "Local build mode is not yet implemented in this scaffold."
-    IO.eprintln "(TODO: checkout PR, lake build, run scripts/dump_crossref_tags.lean)"
-    return 2
+    IO.eprintln "(CI artifacts expire after 5 days; if the build is older, run \
+      scripts/dump_crossref_tags.lean in a local Mathlib checkout and pass the \
+      TSV to `crossref-render --tsv …` directly.)"
+    return 1
   | .ok result =>
     IO.eprintln s!"Got bridge artifact from run {result.runId}; TSV at {result.tsvPath}"
     -- Get the PR's changed .lean files so we can filter the (whole-Mathlib)

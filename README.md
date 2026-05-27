@@ -34,18 +34,19 @@ lake exe crossref-review --pr 12345
 [mathlib4 CI build]
        │
        ▼ scripts/dump_crossref_tags.lean
-   crossref-tags.tsv  (≈55 KB, 539 rows today, defence-in-depth cap 1 MB)
+   crossref-tags.tsv  (≈55 KB, 491 rows today)
        │
        ▼ leanprover-community/privilege-escalation-bridge/emit
    build artifact
        │
        ▼ workflow_run triggers crossref_review.yml in mathlib4
        ▼ privilege-escalation-bridge/consume
-   mathlib-ci orchestrator
+   mathlib-ci orchestrator (post-comment.sh)
        │
-       ▼ git clone external-tags@<PINNED_SHA>
-       ▼ lake exe crossref-render --tsv crossref-tags.tsv --diff origin/master...HEAD --out comment.md
-       ▼ peter-evans/create-or-update-comment
+       ▼ uses external-tags@<PINNED_SHA> from the workflow's actions/cache
+       ▼ gh pr diff --name-only → filter TSV
+       ▼ lake exe crossref-render --tsv … --changed-files … --out comment.md
+       ▼ update_PR_comment.sh
    PR comment posted ✓
 ```
 
@@ -74,8 +75,8 @@ lake exe crossref-snippet wikidata Q42  # second call is free
 1. Add a constructor in `Database`.
 2. Update `Database.name`, `Database.ofName?`, `databaseURL`, `databaseLabel`,
    and `Database.gerbyBase?` in `Crossrefs/Fetch.lean`.
-3. Implement the per-database branch in `fetchOne` (`Fetch.lean`) and
-   `fetchMany` (`Snippet.lean`).
+3. Implement the per-database branch in `Crossrefs.Snippet.fetchMany`
+   (single-API or batched, with `Snippet`'s on-disk cache).
 4. In mathlib4: add the parser, attribute registration, and `#nlab_tags`
    trace command in `Mathlib/Tactic/CrossRefAttribute.lean`.
 
@@ -86,11 +87,11 @@ compile until step 2 is consistent with itself.
 
 ```
 Crossrefs/
-  Fetch.lean       Database enum, types, single-tag fetch, HTTP/HTML helpers
-  Snippet.lean     Batched + cached fetcher
+  Fetch.lean       Database enum, SnippetOutcome, HTTP / HTML / JSON helpers
+  Snippet.lean     Batched + cached fetcher (fetchMany)
   Record.lean      TSV row type + parser
-  Diff.lean        git diff --name-only wrapper
-  Render.lean      Markdown PR comment renderer
+  Diff.lean        git diff --name-only wrapper (for crossref-render --diff)
+  Render.lean      Markdown PR comment renderer with table escaping
   PRArtifact.lean  gh run download wrapper (for crossref-review --pr)
 Cli/
   Snippet.lean     crossref-snippet entry point
@@ -108,5 +109,7 @@ PRs against mathlib4 that originally added this tooling in-tree:
 - https://github.com/leanprover-community/mathlib4/pull/39666 — CI workflow
 
 Following maintainer discussion, the tooling was extracted here to keep
-~1,300 LOC of review surface out of Mathlib. Only the dump script (~40 LOC)
-and a thin `workflow_run` shim (~30 LOC) remain in mathlib4.
+~1,300 LOC of review surface out of Mathlib. The mathlib4 surface is now
+the dump script (~80 LOC including the README entry), the `post_steps`
+emit in `build_template.yml` (~30 LOC), and the `crossref_review.yml`
+workflow_run shim (~120 LOC including the caching scaffolding).

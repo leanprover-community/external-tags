@@ -8,9 +8,10 @@ import Std.Data.HashSet
 /-!
 # Git diff helpers
 
-`crossref-render` and `crossref-review` filter the dump TSV by which files
-the PR actually changed. We delegate to `git diff --name-only` rather than
-parsing diff hunks ourselves.
+Backs `crossref-render --diff <range>` when invoked inside a git checkout
+of the target repo. The CI orchestrator and `crossref-review --pr N` use
+`gh pr diff --name-only` + `--changed-files` instead (no checkout
+needed), so this is only reached from interactive local use.
 -/
 
 namespace Crossrefs

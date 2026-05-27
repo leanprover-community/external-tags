@@ -44,9 +44,9 @@ What's covered (and why):
   Markdown tables don't survive embedded newlines anyway).
 
 A PR author who puts `**missing**` in a tag comment will see it as
-literal `**missing**`, *not* trigger the same string the orchestrator's
-fail-the-check signal once parsed (the orchestrator now uses the
-crossref-render exit code, not a grep). -/
+literal `\*\*missing\*\*` in the rendered cell, and not trigger the
+orchestrator's fail-the-check signal (which uses crossref-render's exit
+code, not a grep of the rendered Markdown). -/
 def mdTableEscape (s : String) : String :=
   s.replace "\\" "\\\\"
    |>.replace "&" "&amp;"
@@ -71,9 +71,11 @@ def mdTableEscape (s : String) : String :=
 the comment can find its own previous post. Must be exact-match unique. -/
 def commentMarker : String := "<!-- external-tags:crossref-review -->"
 
+/-- Top of the PR comment: marker + the H2 we want GitHub to render. -/
 def commentHeader : String :=
   s!"{commentMarker}\n## Cross-reference review\n"
 
+/-- Small grey footer line that goes at the bottom of every PR comment. -/
 def commentFooterNote : String :=
   "<sub>Posted by [external-tags](https://github.com/leanprover-community/external-tags). \
   Snippets are fetched from upstream live; if a tag is reported missing, check that the \
@@ -93,6 +95,9 @@ def renderRow (r : Record) (outcome : SnippetOutcome) : String :=
   let commentCell := if r.comment.isEmpty then "" else mdTableEscape r.comment
   s!"| {tagCell} | {titleCell} | {descCell} | {declCell} | {commentCell} |"
 
+/-- Render one database's rows as a Markdown subsection (H3 + table).
+Returns the empty string if `rows` is empty, so the caller can splice it
+unconditionally. -/
 def renderDatabaseSection (db : Database) (rows : Array (Record × SnippetOutcome)) :
     String := Id.run do
   if rows.isEmpty then return ""

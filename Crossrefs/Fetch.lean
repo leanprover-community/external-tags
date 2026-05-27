@@ -6,10 +6,10 @@ Authors: Kim Morrison
 import Lean.Data.Json
 
 /-!
-# Cross-reference snippet types and single-tag fetch
+# Cross-reference snippet types and shared helpers
 
-`Database`, the outcome type, and HTTP / parsing primitives. `Crossrefs.Snippet`
-builds the batched + cached fetcher on top.
+`Database`, the outcome type, and the HTTP / HTML / JSON primitives shared by
+the batched + cached fetcher in `Crossrefs.Snippet`.
 -/
 
 namespace Crossrefs
@@ -20,10 +20,10 @@ open Lean
 
 When adding a new case, also update:
 - `databaseURL`, `databaseLabel`, `Database.name`, `Database.ofName?`,
-  the per-database branch in `fetchOne`, and `Database.gerbyBase?` below;
+  and `Database.gerbyBase?` below;
+- the per-database branch in `Crossrefs.Snippet.fetchMany`;
 - the parser, `syntax (name := ...)`, `registerBuiltinAttribute`, and
-  `#X_tags` trace command in mathlib4's `Mathlib/Tactic/CrossRefAttribute.lean`;
-- the per-database branch in `Crossrefs.Snippet.fetchMany`.
+  `#X_tags` trace command in mathlib4's `Mathlib/Tactic/CrossRefAttribute.lean`.
 
 The `ofName?_name` roundtrip theorem below catches drift between `name` and
 `ofName?` at compile time. -/
@@ -144,37 +144,6 @@ def jsonStrPath? (j : Json) (path : List String) : Option String :=
       | .error _ => none
   go j path
 
-/-! ## Wikidata -/
-
-/-- Fetch a single QID from Wikidata. -/
-def fetchWikidataOne (qid : String) : IO SnippetOutcome := do
-  let url := s!"https://www.wikidata.org/w/api.php?action=wbgetentities&ids={qid}\
-              &languages=en&props=labels%7Cdescriptions&format=json"
-  let (status, body) ← fetchUrl url
-  if status != 200 then return .network s!"wikidata HTTP {status}"
-  match Json.parse body with
-  | .error e => return .network s!"wikidata json: {e}"
-  | .ok json =>
-    match json.getObjVal? "error" with
-    | .ok err =>
-      let code := jsonStrPath? err ["code"] |>.getD ""
-      let info := jsonStrPath? err ["info"] |>.getD code
-      if code == "no-such-entity" then return .missing
-      else return .network s!"wikidata {code}: {info}"
-    | _ =>
-      match json.getObjVal? "entities" with
-      | .error _ => return .network "wikidata: no `entities` field"
-      | .ok entities =>
-        match entities.getObjVal? qid with
-        | .error _ => return .missing
-        | .ok ent =>
-          match ent.getObjVal? "missing" with
-          | .ok _ => return .missing
-          | _ =>
-            let label := jsonStrPath? ent ["labels", "en", "value"] |>.getD ""
-            let desc  := jsonStrPath? ent ["descriptions", "en", "value"] |>.getD ""
-            return .ok (flattenWhitespace label) (flattenWhitespace desc)
-
 /-! ## Stacks / Kerodon (Gerby) -/
 
 /-- The base URL for a Gerby-style database, or `none` for Wikidata. -/
@@ -213,25 +182,5 @@ def parseGerbyTitle (html : String) : String :=
       | some inside => takeUntilChar inside '<'
   let cap := envType.capitalize
   flattenWhitespace (if reference.isEmpty then cap else s!"{cap} {reference}")
-
-/-- Fetch one Stacks/Kerodon tag. Gerby returns HTTP 200 even for missing
-tags; we detect via the body text. -/
-def fetchGerbyOne (db : Database) (tag : String) : IO SnippetOutcome := do
-  let some base := db.gerbyBase? | return .network s!"{db.name}: no Gerby base"
-  let url := s!"{base}/data/tag/{tag}/content/statement"
-  let (status, body) ← fetchUrl url
-  if status != 200 then return .network s!"{db.name} HTTP {status}"
-  if body.trimAscii.toString == "This tag does not exist." then return .missing
-  let title := parseGerbyTitle body
-  let snippet := stripHtml body
-  if title.isEmpty && snippet.isEmpty then
-    return .network s!"{db.name}: could not parse statement"
-  return .ok title snippet
-
-/-- Fetch one snippet from the appropriate upstream database. -/
-def fetchOne (db : Database) (tag : String) : IO SnippetOutcome :=
-  match db with
-  | .wikidata => fetchWikidataOne tag
-  | _ => fetchGerbyOne db tag
 
 end Crossrefs
