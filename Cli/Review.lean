@@ -98,10 +98,26 @@ def main (argv : List String) : IO UInt32 := do
     return 2
   | .ok result =>
     IO.eprintln s!"Got bridge artifact from run {result.runId}; TSV at {result.tsvPath}"
+    -- Get the PR's changed .lean files so we can filter the (whole-Mathlib)
+    -- TSV down to what the PR actually touched. We use `gh pr diff
+    -- --name-only` instead of a local `git diff` so this works from any
+    -- directory (no mathlib checkout required).
+    let diffProc ← IO.Process.output {
+      cmd := "gh"
+      args := #["pr", "diff", toString pr, "--repo", args.repo, "--name-only"]
+    }
+    if diffProc.exitCode != 0 then
+      IO.eprintln s!"gh pr diff failed:\n{diffProc.stderr}"
+      return 1
+    let changedFiles := result.extractDir / "changed.txt"
+    let lean := diffProc.stdout.splitOn "\n" |>.filter fun l => l.endsWith ".lean"
+    IO.FS.writeFile changedFiles (String.intercalate "\n" lean)
     let outPath := args.out.getD (result.extractDir / "crossref-review.md")
     let renderExe := (← IO.appPath).parent.getD "." / "crossref-render"
     let renderArgs : Array String :=
-      #["--tsv", result.tsvPath.toString, "--out", outPath.toString]
+      #["--tsv", result.tsvPath.toString,
+        "--changed-files", changedFiles.toString,
+        "--out", outPath.toString]
     let proc ← IO.Process.spawn { cmd := renderExe.toString, args := renderArgs }
     let exit ← proc.wait
     if exit != 0 && exit != 1 && exit != 2 then

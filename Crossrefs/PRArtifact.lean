@@ -18,10 +18,10 @@ namespace Crossrefs
 /-- The repo we look in for build artifacts. -/
 def defaultRepo : String := "leanprover-community/mathlib4"
 
-/-- The artifact name emitted by mathlib4's build pipeline (matches the
+/-- The artifact name emitted by mathlib4's build pipeline. Must match the
 `artifact:` value in `build_template.yml`'s `privilege-escalation-bridge/emit`
-step). -/
-def bridgeArtifactName : String := "workflow-data"
+step (`crossref-tags-bridge`). -/
+def bridgeArtifactName : String := "crossref-tags-bridge"
 
 /-- The expected TSV filename inside the bridge artifact. -/
 def tsvName : String := "crossref-tags.tsv"

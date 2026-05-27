@@ -30,9 +30,10 @@ is `missing`, 2 = comment written, all tags resolve. Other non-zero = error.
 open Crossrefs
 
 structure Args where
-  tsv  : Option System.FilePath := none
-  diff : Option String := none
-  out  : Option System.FilePath := none
+  tsv           : Option System.FilePath := none
+  diff          : Option String := none
+  changedFiles  : Option System.FilePath := none
+  out           : Option System.FilePath := none
 
 def parseArgs (argv : List String) : IO (Option Args) := do
   let mut out : Args := {}
@@ -48,6 +49,10 @@ def parseArgs (argv : List String) : IO (Option Args) := do
       if i + 1 ≥ argv.size then IO.eprintln "--diff expects a value"; return none
       out := { out with diff := some argv[i + 1]! }
       i := i + 2
+    else if a == "--changed-files" then
+      if i + 1 ≥ argv.size then IO.eprintln "--changed-files expects a value"; return none
+      out := { out with changedFiles := some argv[i + 1]! }
+      i := i + 2
     else if a == "--out" then
       if i + 1 ≥ argv.size then IO.eprintln "--out expects a value"; return none
       out := { out with out := some argv[i + 1]! }
@@ -57,15 +62,29 @@ def parseArgs (argv : List String) : IO (Option Args) := do
   return some out
 
 def usage : IO Unit := do
-  IO.eprintln "Usage: crossref-render --tsv <path> [--diff <range>] [--out <path>]"
+  IO.eprintln "Usage: crossref-render --tsv <path> [--diff <range>] \
+    [--changed-files <path>] [--out <path>]"
+  IO.eprintln "  --diff requires being inside a git checkout of the repo."
+  IO.eprintln "  --changed-files reads one path per line; no git required."
 
-def filterByDiff? (records : Array Record) (diff : Option String) :
+def loadChangedFiles (path : System.FilePath) : IO (Std.HashSet String) := do
+  let text ← IO.FS.readFile path
+  let mut s : Std.HashSet String := ∅
+  for line in text.splitOn "\n" do
+    let trimmed := line.trimAscii.toString
+    if !trimmed.isEmpty then s := s.insert trimmed
+  return s
+
+def filterByDiff? (records : Array Record) (args : Args) :
     IO (Array Record) := do
-  match diff with
-  | none => return records
-  | some range =>
+  match args.changedFiles, args.diff with
+  | some path, _ =>
+    let changed ← loadChangedFiles path
+    return records.filter fun r => changed.contains r.module
+  | none, some range =>
     let changed ← gitChangedFiles range
     return records.filter fun r => changed.contains r.module
+  | none, none => return records
 
 /-- Run `fetchMany` for each database, then zip the outcomes back onto the
 records in the original order. -/
@@ -103,7 +122,7 @@ def main (argv : List String) : IO UInt32 := do
     | .inr r    => records := records.push r
   if !malformed.isEmpty then
     IO.eprintln s!"warning: ignored {malformed.size} malformed TSV row(s)"
-  let filtered ← filterByDiff? records args.diff
+  let filtered ← filterByDiff? records args
   if filtered.isEmpty then
     IO.eprintln "no cross-reference tags in scope; nothing to comment"
     return 0

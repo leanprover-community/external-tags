@@ -27,14 +27,40 @@ namespace Crossrefs
 
 /-! ## Escaping -/
 
-/-- Escape a string for safe inclusion inside a Markdown table cell. We
-replace `|` with `\|`, newlines with `<br>`, and backticks with a fancy
-unicode tick. The output is meant to render verbatim — no upstream content
-should be interpreted as Markdown syntax. -/
+/-- Escape a string for safe verbatim rendering inside a Markdown table
+cell on GitHub. Both upstream snippet text and PR-author tag comments end
+up here; we treat both as untrusted.
+
+What's covered (and why):
+- `\` doubled first, so subsequent backslash escapes aren't ambiguous;
+- `|` to prevent breaking out of the table cell;
+- backticks swapped for `ˋ` to prevent code-span injection;
+- `&`, `<`, `>` HTML-entity-encoded so an upstream `<table>` or `<img>`
+  can't restructure the bot comment (GitHub renders inline HTML, even
+  though it strips `<script>` etc.);
+- `*`, `_`, `[`, `]`, `(`, `)`, `#` backslash-escaped so emphasis,
+  link-spoofing, and heading syntax don't fire;
+- `\r\n`, `\n`, `\r` collapsed to spaces (TSV is one row per line and
+  Markdown tables don't survive embedded newlines anyway).
+
+A PR author who puts `**missing**` in a tag comment will see it as
+literal `**missing**`, *not* trigger the same string the orchestrator's
+fail-the-check signal once parsed (the orchestrator now uses the
+crossref-render exit code, not a grep). -/
 def mdTableEscape (s : String) : String :=
   s.replace "\\" "\\\\"
+   |>.replace "&" "&amp;"
+   |>.replace "<" "&lt;"
+   |>.replace ">" "&gt;"
    |>.replace "|" "\\|"
    |>.replace "`" "ˋ"
+   |>.replace "*" "\\*"
+   |>.replace "_" "\\_"
+   |>.replace "[" "\\["
+   |>.replace "]" "\\]"
+   |>.replace "(" "\\("
+   |>.replace ")" "\\)"
+   |>.replace "#" "\\#"
    |>.replace "\r\n" " "
    |>.replace "\n" " "
    |>.replace "\r" " "
