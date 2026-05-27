@@ -107,7 +107,6 @@ PRs against mathlib4 that originally added this tooling in-tree:
 - https://github.com/leanprover-community/mathlib4/pull/39664 — info-view widget (dropped)
 - https://github.com/leanprover-community/mathlib4/pull/39666 — CI workflow
 
-Following [a DM discussion with Johan Commelin](https://leanprover.zulipchat.com/#narrow/dm/110087,112680-dm/near/597848507),
-the tooling was extracted here to keep ~1,300 LOC of review surface out of
-Mathlib. Only the dump script (~40 LOC) and a thin `workflow_run` shim
-(~30 LOC) remain in mathlib4.
+Following maintainer discussion, the tooling was extracted here to keep
+~1,300 LOC of review surface out of Mathlib. Only the dump script (~40 LOC)
+and a thin `workflow_run` shim (~30 LOC) remain in mathlib4.
